@@ -326,7 +326,7 @@ def upgrade_pre(is_force=False):
 def install_agent2_rpm(url, is_force=False):
     """安装 agnet2 的 rpm 包。
     """
-    if is_force:
+    if is_force and if os.path.isfile(AGENT2_PATH):
         command_lst = ["yum", "remove", "-y", "zabbix-agent2"]
         if lnx_command_execute(command_lst):
             logging.info("zabbix-agent2 is removed successfully")
