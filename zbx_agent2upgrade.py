@@ -285,7 +285,7 @@ def execute(url):
 
 if __name__ == "__main__":
     # ########## Self Test
-    INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
+    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
     # ########## EOF Self Tes
 
     init_logger("debug")
