@@ -25,7 +25,7 @@ AGENTD_PATH = "/usr/sbin/zabbix_agentd"
 AGENTD_CONF = "/etc/zabbix/zabbix_agentd.conf"
 CONF_IGNORE_ITEM = [
     "PidFile",
-    "StartAgents"
+    "StartAgents",
 ]
 # from https://www.zabbix.com/documentation/current/manual/config/items/plugins (5.2)
 CONF_CONFLICT_UP = [
@@ -315,7 +315,7 @@ def upgrade_pre(is_force=False):
 
     # check agent2 is installed
     if os.path.isfile(AGENT2_PATH) and not is_force:
-        raise Exception("the agent2 has been installed on {!s}".format(_agent2_path))
+        raise Exception("the agent2 has been installed on {!s}".format(AGENT2_PATH))
 
     # echo current agentd version
     if os.path.isfile(AGENTD_PATH):
@@ -323,9 +323,17 @@ def upgrade_pre(is_force=False):
         pipe = subprocess.Popen(command_lst, stdout=subprocess.PIPE)
         info_echo("version", pipe.stdout.read().decode("utf-8").strip())
 
-def install_agent2_rpm(url):
+def install_agent2_rpm(url, is_force=False):
     """安装 agnet2 的 rpm 包。
     """
+    if is_force:
+        command_lst = ["yum", "remove", "-y", "zabbix-agent2"]
+        if lnx_command_execute(command_lst):
+            logging.info("zabbix-agent2 is removed successfully")
+        else:
+            logging.error("zabbix-agent2 removing is failed")
+            raise Exception()
+
     command_lst = ["rpm", "-ivh", url]
     if lnx_command_execute(command_lst):
         logging.info("zabbix-agent2 rpm is installed successfully")
@@ -401,9 +409,9 @@ def conv_agent2_enable():
 
 def execute(url, is_force):
     # 1. 抓取一次当前 agentd 的版本，备份 agentd 的文件。
-    upgrade_pre()
+    upgrade_pre(is_force)
     # 2. yum/rpm 安装对应的 agent2 rpm。
-    install_agent2_rpm(url)
+    install_agent2_rpm(url, is_force)
     # 3. 根据现有的 agentd 的配置填充到 agent2 中。
     conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, is_force)
     # 4. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
@@ -426,11 +434,16 @@ class MultiOrderedDict(OrderedDict):
 
 if __name__ == "__main__":
     # ########## Self Test
-    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
-    # INPUT_IS_FORCE = False
+    INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
+    INPUT_IS_FORCE = True
     # ########## EOF Self Tes
 
     init_logger("debug")
+
+    # input args deal
+    INPUT_IS_FORCE = True if str(INPUT_IS_FORCE).lower() == "true" else False
+    # EOF
+
     try:
         execute(
             url = INPUT_AGENT2_RPM_URL,
