@@ -173,9 +173,35 @@ def systemctl_action(action, service):
         logging.debug("systemctl action is failed")
         return False
 
+def get_sysversion():
+    """获取当前操作系统的版本信息。
+
+    Returns:
+        <str> "win": 所有 windows 平台。
+        <str> "el5": CentOS/RedHat 5。
+        <str> "el6": CentOS/RedHat 6。
+        <str> "el7": CentOS/RedHat 7。
+    """
+    if platform.system().lower() == "windows":
+        return "win"
+    elif platform.system().lower() == "linux":
+        res_tmp = subprocess.check_output(["uname", "-r"]).strip()
+        res = re.search('el[0-9]', res_tmp).group()
+        if res:
+            return res
+        else:
+            logging.error("Cannot get sysversion from [{!s}].".format(res_tmp))
+            raise Exception()
+
 def upgrade_pre(is_force=False):
     """升级前的检查和信息反馈。
     """
+    # only support el7 OS
+    os_version = get_sysversion()
+    if os_version != "el7":
+        raise Exception("not support the os version")
+    logging.info("the os version is {!s}".format(os_version))
+
     # check agent2 is installed
     if os.path.isfile(AGENT2_PATH) and not is_force:
         raise Exception("the agent2 has been installed on {!s}".format(_agent2_path))
@@ -259,7 +285,7 @@ def execute(url):
 
 if __name__ == "__main__":
     # ########## Self Test
-    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
+    INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
     # ########## EOF Self Tes
 
     init_logger("debug")
