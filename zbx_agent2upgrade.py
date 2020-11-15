@@ -389,12 +389,13 @@ def conv_agent2_conf(agentd_conf_path, agent2_conf_path, is_force):
 def conv_agent2_enable():
     """
     """
-    if not systemctl_action("stop", "zabbix-agent"):
-        logging.error("systemctl stop zabbix-agent is failed, please check")
-        return False
-    if not systemctl_action("disable", "zabbix-agent"):
-        logging.error("systemctl disable zabbix-agent is failed, please check")
-        return False
+    if os.path.isfile(AGENTD_PATH):
+        if not systemctl_action("stop", "zabbix-agent"):
+            logging.error("systemctl stop zabbix-agent is failed, please check")
+            return False
+        if not systemctl_action("disable", "zabbix-agent"):
+            logging.error("systemctl disable zabbix-agent is failed, please check")
+            return False
     if not systemctl_action("start", "zabbix-agent2"):
         logging.error("systemctl start zabbix-agent2 is failed, please check")
         return False
@@ -413,7 +414,8 @@ def execute(url, is_force):
     # 2. yum/rpm 安装对应的 agent2 rpm。
     install_agent2_rpm(url, is_force)
     # 3. 根据现有的 agentd 的配置填充到 agent2 中。
-    conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, is_force)
+    if os.path.isfile(AGENTD_CONF):
+        conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, is_force)
     # 4. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
     # systemctl disable zabbix-agent
     # systemctl start zabbix-agent2
