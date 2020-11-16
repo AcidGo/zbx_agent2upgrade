@@ -4,6 +4,9 @@
 # Author: AcidGo
 # Usage:
 #   url: 指定安装包的资源路径。
+#   can_remove: 是否允许已部署的 Agent2 卸载。
+#   deal_conflict_up: 是否允许解决冲突 UserParameter。
+#   exec_rollback: 是否执行回滚操作。
 
 
 from __future__ import print_function
@@ -304,6 +307,35 @@ def get_sysversion():
             logging.error("Cannot get sysversion from [{!s}].".format(res_tmp))
             raise Exception()
 
+def url_test(url, timeout=5):
+    """测试 url 是否在超时范围内可达。
+
+    Args:
+        url: 测试 URL。
+        timeout: 超时秒数。
+    Returns:
+        <bool>: 测试通过与否。
+    """
+    pass
+
+def rollback_agentd():
+    """回滚 Zabbix-Agent2 安装，如果存在 Zabbix-Agent 则将其拉起。
+    """
+    if not os.path.isfile(AGENTD_CONF) and not os.path.isfile(AGENTD_PATH):
+        raise Exception("not found agentd files")
+    if os.path.isfile(AGENT2_PATH):
+        if not systemctl_action("stop", "zabbix-agent2"):
+            raise Exception("cannot systemctl stop zabbix-agent2")
+        if not systemctl_action("disable", "zabbix-agent2"):
+            logging.error("cannot systemctl disable zabbix-agent2")
+    if not systemctl_action("start", "zabbix-agent"):
+        raise Exception("cannot systemctl start zabbix-agent")
+    if not systemctl_action("enable", "zabbix-agent"):
+        logging.error("cannot systemctl enable zabbix-agent")
+    time.sleep(1)
+    if not systemctl_action("status", "zabbix-agent"):
+        raise Exception("zabbix-agent status is not good, please check")
+
 def upgrade_pre(is_force=False):
     """升级前的检查和信息反馈。
     """
@@ -327,7 +359,7 @@ def install_agent2_rpm(url, is_force=False):
     """安装 agnet2 的 rpm 包。
     """
     if is_force and if os.path.isfile(AGENT2_PATH):
-        command_lst = ["yum", "remove", "-y", "zabbix-agent2"]
+        command_lst = ["rpm", "-evh", "zabbix-agent2"]
         if lnx_command_execute(command_lst):
             logging.info("zabbix-agent2 is removed successfully")
         else:
@@ -396,32 +428,39 @@ def conv_agent2_enable():
         if not systemctl_action("disable", "zabbix-agent"):
             logging.error("systemctl disable zabbix-agent is failed, please check")
             return False
+        time.sleep(1)
     if not systemctl_action("start", "zabbix-agent2"):
         logging.error("systemctl start zabbix-agent2 is failed, please check")
         return False
     if not systemctl_action("enable", "zabbix-agent2"):
         logging.error("systemctl enable zabbix-agent2 is failed, please check")
         return False
+    time.sleep(1)
     if not systemctl_action("status", "zabbix-agent2"):
         logging.error("systemctl enable zabbix-agent2 is failed, please check")
         return False
 
     return True
 
-def execute(url, is_force):
+def execute(url, can_remove, deal_with_up, exec_rollback):
+    if exec_rollback:
+        rollback_agentd()
+        return
+
     # 1. 抓取一次当前 agentd 的版本，备份 agentd 的文件。
-    upgrade_pre(is_force)
+    upgrade_pre(can_remove)
     # 2. yum/rpm 安装对应的 agent2 rpm。
-    install_agent2_rpm(url, is_force)
+    install_agent2_rpm(url, can_remove)
     # 3. 根据现有的 agentd 的配置填充到 agent2 中。
     if os.path.isfile(AGENTD_CONF):
-        conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, is_force)
+        conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, deal_with_up)
     # 4. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
     # systemctl disable zabbix-agent
     # systemctl start zabbix-agent2
     # systemctl enable zabbix-agent2
     # systemctl status zabbix-agent2
-    conv_agent2_enable()
+    if not conv_agent2_enable():
+        raise Exception("conv agent2 systemd is failed")
 
 class MultiOrderedDict(OrderedDict):
     """from https://stackoverflow.com/questions/15848674/how-to-configparse-a-file-keeping-multiple-values-for-identical-keys
@@ -436,20 +475,24 @@ class MultiOrderedDict(OrderedDict):
 
 if __name__ == "__main__":
     # ########## Self Test
-    INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
-    INPUT_IS_FORCE = True
+    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
+    # INPUT_CAN_REMOVE = True
     # ########## EOF Self Tes
 
     init_logger("debug")
 
     # input args deal
-    INPUT_IS_FORCE = True if str(INPUT_IS_FORCE).lower() == "true" else False
+    INPUT_CAN_REMOVE = True if str(INPUT_CAN_REMOVE).lower() == "true" else False
+    INPUT_DEAL_CONFLICT_UP = True if str(INPUT_DEAL_CONFLICT_UP).lower() == "true" else False
+    INPUT_ROLLBACK = True if str(INPUT_ROLLBACK).lower() == "true" else False
     # EOF
 
     try:
         execute(
             url = INPUT_AGENT2_RPM_URL,
-            is_force = INPUT_IS_FORCE
+            can_remove = INPUT_CAN_REMOVE,
+            deal_with_up = INPUT_DEAL_CONFLICT_UP,
+            exec_rollback = INPUT_ROLLBACK,
         )
     except Exception as e:
         logging.exception(e)
