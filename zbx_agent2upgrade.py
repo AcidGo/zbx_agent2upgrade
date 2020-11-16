@@ -5,7 +5,7 @@
 # Usage:
 #   url: 指定安装包的资源路径。
 #   can_remove: 是否允许已部署的 Agent2 卸载。
-#   deal_conflict_up: 是否允许解决冲突 UserParameter。
+#   deal_with_up: 是否允许解决冲突 UserParameter。
 #   exec_rollback: 是否执行回滚操作。
 
 
@@ -30,6 +30,8 @@ CONF_IGNORE_ITEM = [
     "PidFile",
     "StartAgents",
 ]
+CONFLICT_SUFFIX = ".agent2upgrade.disable"
+CONF_BACKUP_SUFFIX = ".agent2upgrade.bak"
 # from https://www.zabbix.com/documentation/current/manual/config/items/plugins (5.2)
 CONF_CONFLICT_UP = [
     "agent.hostname", "agent.ping", "agent.version", 
@@ -209,11 +211,24 @@ def deal_conflict_up(up_dict):
                     # 直接整个文件关闭匹配
                     conf_dir = os.path.dirname(k)
                     conf_name = os.path.basename(k)
-                    disable_path = os.path.join(conf_dir, conf_name + ".disable")
+                    disable_path = os.path.join(conf_dir, conf_name + CONFLICT_SUFFIX)
                     shutil.move(k, disable_path)
                     logging.info("deal with conflict UserParameter on outer config: {!s} -> {!s}".format(k, disable_path))
                     has_deal = True
                     break
+
+def rollback_conflict_up(conf_path):
+    up_dict = check_conflict_up(conf_path)
+    for k, v in up_dict.items():
+        if k.startswith("@"):
+            continue
+        conf_dir = os.path.dirname(k)
+        conf_name = os.path.basename(k)
+        if not conf_name.endswith(CONFLICT_SUFFIX):
+            continue
+        enable_path = os.path.join(conf_dir, "".join(conf_name.split(CONFLICT_SUFFIX)[:-1]))
+        shutil.move(k, enable_path)
+        logging.info("deal with conflict UserParameter on outer config: {!s} -> {!s}".format(k, enable_path))
 
 def update_diff_conf(path, update_items, add_items, ignore_items):
     """将差异的 conf 文件内容补齐。
@@ -265,7 +280,7 @@ def update_diff_conf(path, update_items, add_items, ignore_items):
             line_list = line_list[:i_idx+1] + ["{!s} = {!s}\n".format(i[0], i[1]),] + line_list[i_idx+1:]
 
     # bacup(options)
-    path_bak = path + ".agent2upgrade.bak"
+    path_bak = path + CONF_BACKUP_SUFFIX
     with open(path_bak, "w") as f:
         for line in original_list:
             f.write(line)
@@ -316,7 +331,13 @@ def url_test(url, timeout=5):
     Returns:
         <bool>: 测试通过与否。
     """
-    pass
+    from urllib2 import urlopen, URLError
+    try:
+        urlopen(url, timeout = int(timeout))
+    except Exception as e:
+        return False
+    else:
+        return True
 
 def rollback_agentd():
     """回滚 Zabbix-Agent2 安装，如果存在 Zabbix-Agent 则将其拉起。
@@ -328,6 +349,9 @@ def rollback_agentd():
             raise Exception("cannot systemctl stop zabbix-agent2")
         if not systemctl_action("disable", "zabbix-agent2"):
             logging.error("cannot systemctl disable zabbix-agent2")
+
+    rollback_conflict_up(AGENTD_CONF)
+
     if not systemctl_action("start", "zabbix-agent"):
         raise Exception("cannot systemctl start zabbix-agent")
     if not systemctl_action("enable", "zabbix-agent"):
@@ -366,6 +390,8 @@ def install_agent2_rpm(url, is_force=False):
             logging.error("zabbix-agent2 removing is failed")
             raise Exception()
 
+    if not url_test(url):
+        raise Exception("cannot access the rpm url: {!s}".format(url))
     command_lst = ["rpm", "-ivh", url]
     if lnx_command_execute(command_lst):
         logging.info("zabbix-agent2 rpm is installed successfully")
@@ -485,7 +511,7 @@ if __name__ == "__main__":
     INPUT_CAN_REMOVE = True if str(INPUT_CAN_REMOVE).lower() == "true" else False
     INPUT_DEAL_CONFLICT_UP = True if str(INPUT_DEAL_CONFLICT_UP).lower() == "true" else False
     INPUT_ROLLBACK = True if str(INPUT_ROLLBACK).lower() == "true" else False
-    # EOF
+    # EOF input args deal
 
     try:
         execute(
