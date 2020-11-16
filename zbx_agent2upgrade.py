@@ -224,7 +224,8 @@ def rollback_conflict_up(conf_path):
             continue
         conf_dir = os.path.dirname(k)
         conf_name = os.path.basename(k)
-        if not conf_name.endswith(CONFLICT_SUFFIX):
+        disable_name = os.path.basename(k) + CONFLICT_SUFFIX
+        if not os.path.isfile(disable_name):
             continue
         enable_path = os.path.join(conf_dir, "".join(conf_name.split(CONFLICT_SUFFIX)[:-1]))
         shutil.move(k, enable_path)
