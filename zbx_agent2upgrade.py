@@ -28,10 +28,22 @@ AGENTD_PATH = "/usr/sbin/zabbix_agentd"
 AGENTD_CONF = "/etc/zabbix/zabbix_agentd.conf"
 CONF_IGNORE_ITEM = [
     "PidFile",
+    # This parameter was used in Zabbix agent to increase passive check concurrency or disable them.
+    # In Agent 2, the concurrency is configured at a plugin level and can be limited by a capacity setting.
+    # Whereas disabling passive checks is not currently supported.
     "StartAgents",
 ]
 CONFLICT_SUFFIX = ".agent2upgrade.disable"
 CONF_BACKUP_SUFFIX = ".agent2upgrade.bak"
+# from https://www.zabbix.com/documentation/5.0/manual/concepts/agent2 (5.2)
+CONF_AGENT2_NOTSUPPORT_PARAMS = [
+    # Not supported because daemonization is not supported.
+    "AllowRoot",
+    "User",
+    # Loadable modules are not supported.
+    "LoadModule",
+    "LoadModulePath",
+]
 # from https://www.zabbix.com/documentation/current/manual/config/items/plugins (5.2)
 CONF_CONFLICT_UP = [
     "agent.hostname", "agent.ping", "agent.version", 
@@ -231,7 +243,6 @@ def rollback_conflict_up(conf_path):
     up_dir_set = get_include_up(conf_path)
     for d in up_dir_set:
         for f in glob.glob(d + CONFLICT_SUFFIX):
-            print(f)
             if not os.path.isfile(f):
                 continue
             conf_dir = os.path.dirname(f)
@@ -253,10 +264,9 @@ def update_diff_conf(path, update_items, add_items, ignore_items):
         original_list = [l for l in f]
     tmp_line_list = [l for l in original_list]
 
-    logging.debug("start to deal with update_items ......")
+    logging.debug("dealing with update_items ......")
     for l in tmp_line_list:
         line = l
-        # print(l, end="")
         for i in update_items:
             if i[0] in ignore_items:
                 continue
@@ -270,7 +280,7 @@ def update_diff_conf(path, update_items, add_items, ignore_items):
                 break
         line_list.append(line)
 
-    logging.debug("start to deal with add_items ......")
+    logging.debug("dealing with add_items ......")
     for i in add_items:
         if i[0] in ignore_items:
             continue
@@ -349,6 +359,16 @@ def url_test(url, timeout=5):
     else:
         return True
 
+def remove_item_pair_value(items, k):
+    """
+    """
+    res = []
+    for i in items:
+        if i[0] == k:
+            continue
+        res.append(i)
+    return res
+
 def rollback_agentd():
     """回滚 Zabbix-Agent2 安装，如果存在 Zabbix-Agent 则将其拉起。
     """
@@ -389,6 +409,16 @@ def upgrade_pre(is_force=False):
         pipe = subprocess.Popen(command_lst, stdout=subprocess.PIPE)
         info_echo("version", pipe.stdout.read().decode("utf-8").strip())
 
+def has_not_support_params(agentd_conf_path):
+    """
+    """
+    has_not_support = False
+    for i in parse_zbx_conf(agentd_conf_path):
+        if i[0].strip() in CONF_AGENT2_NOTSUPPORT_PARAMS:
+            logging.warning("the agent2 not suport the param: {!s}".format(i[0].strip()))
+            has_not_support = True
+    return has_not_support
+
 def install_agent2_rpm(url, is_force=False):
     """安装 agnet2 的 rpm 包。
     """
@@ -409,7 +439,7 @@ def install_agent2_rpm(url, is_force=False):
         logging.error("zabbix-agent2 rpm installing is failed")
         raise Exception()
 
-def conv_agent2_conf(agentd_conf_path, agent2_conf_path, is_force):
+def conv_agent2_conf(agentd_conf_path, agent2_conf_path, is_force, ignore_not_support_params):
     """对齐存在的 agentd 的配置。
     """
     agentd_items = parse_zbx_conf(agentd_conf_path)
@@ -435,6 +465,11 @@ def conv_agent2_conf(agentd_conf_path, agent2_conf_path, is_force):
 
     update_items = [(i[0], i[1]) for i in agentd_items if i[0] in diff_set]
     add_items = [(i[0], i[1]) for i in agentd_items if i[0] in add_set]
+    if ignore_not_support_params:
+        logging.info("excluding not support params ......")
+        for i in CONF_AGENT2_NOTSUPPORT_PARAMS:
+            update_items = remove_item_pair_value(update_items, i)
+            add_items = remove_item_pair_value(add_items, i)
     logging.debug("in conv_agent2_conf, update_items: {!s}".format(str(update_items)))
     logging.debug("in conv_agent2_conf, add_items: {!s}".format(str(add_items)))
     update_diff_conf(AGENT2_CONF, update_items, add_items, CONF_IGNORE_ITEM)
@@ -473,12 +508,12 @@ def conv_agent2_enable():
         return False
     time.sleep(1)
     if not systemctl_action("status", "zabbix-agent2"):
-        logging.error("systemctl enable zabbix-agent2 is failed, please check")
+        logging.error("systemctl status zabbix-agent2 is failed, please check")
         return False
 
     return True
 
-def execute(url, can_remove, deal_with_up, exec_rollback):
+def execute(url, can_remove, ignore_not_support_params, deal_with_up, exec_rollback):
     # Pre Checking
     if not exec_rollback and not url:
         raise Exception("please input the url param")
@@ -490,11 +525,14 @@ def execute(url, can_remove, deal_with_up, exec_rollback):
 
     # 1. 抓取一次当前 agentd 的版本，备份 agentd 的文件。
     upgrade_pre(can_remove)
+    # 3. 检查 Zabbix-Agent2 不支持的配置项
+    if not ignore_not_support_params and has_not_support_params(AGENTD_CONF):
+        raise Exception("found not support params, and choose not ignore them")
     # 2. yum/rpm 安装对应的 agent2 rpm。
     install_agent2_rpm(url, can_remove)
     # 3. 根据现有的 agentd 的配置填充到 agent2 中。
     if os.path.isfile(AGENTD_CONF):
-        conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, deal_with_up)
+        conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, deal_with_up, ignore_not_support_params)
     # 4. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
     # systemctl disable zabbix-agent
     # systemctl start zabbix-agent2
@@ -516,8 +554,9 @@ class MultiOrderedDict(OrderedDict):
 
 if __name__ == "__main__":
     # ########## Self Test
-    # INPUT_AGENT2_RPM_URL = ""
+    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
     # INPUT_CAN_REMOVE = True
+    # INPUT_IGNORE_NOT_SUPPORT_PARAMS = False
     # INPUT_DEAL_CONFLICT_UP = True
     # INPUT_ROLLBACK = False
     # ########## EOF Self Tes
@@ -526,6 +565,7 @@ if __name__ == "__main__":
 
     # input args deal
     INPUT_CAN_REMOVE = True if str(INPUT_CAN_REMOVE).lower() == "true" else False
+    INPUT_IGNORE_NOT_SUPPORT_PARAMS = True if str(INPUT_IGNORE_NOT_SUPPORT_PARAMS).lower() == "true" else False
     INPUT_DEAL_CONFLICT_UP = True if str(INPUT_DEAL_CONFLICT_UP).lower() == "true" else False
     INPUT_ROLLBACK = True if str(INPUT_ROLLBACK).lower() == "true" else False
     # EOF input args deal
@@ -534,6 +574,7 @@ if __name__ == "__main__":
         execute(
             url = INPUT_AGENT2_RPM_URL,
             can_remove = INPUT_CAN_REMOVE,
+            ignore_not_support_params = INPUT_IGNORE_NOT_SUPPORT_PARAMS,
             deal_with_up = INPUT_DEAL_CONFLICT_UP,
             exec_rollback = INPUT_ROLLBACK,
         )
