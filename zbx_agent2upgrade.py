@@ -154,6 +154,7 @@ def check_conflict_up(agent_conf_path):
     Args:
         agent_conf_path: Zabbix-Agentd/2 的配置文件路径。
     Returns:
+        <bool>: 是否冲突。
         <dict>: {<up_path>: [<key1>, <key2> ...]}
     """
     res = {}
@@ -184,6 +185,15 @@ def check_conflict_up(agent_conf_path):
                 return True, res
 
     return False, res
+
+def get_include_up(agent_conf_path):
+    """
+    """
+    res = set()
+    for i in parse_zbx_conf(agent_conf_path):
+        if i[0] == "Include":
+            res.add(i[1].strip())
+    return res
 
 def deal_conflict_up(up_dict):
     """
@@ -218,18 +228,17 @@ def deal_conflict_up(up_dict):
                     break
 
 def rollback_conflict_up(conf_path):
-    up_dict = check_conflict_up(conf_path)
-    for k, v in up_dict.items():
-        if k.startswith("@"):
-            continue
-        conf_dir = os.path.dirname(k)
-        conf_name = os.path.basename(k)
-        disable_name = os.path.basename(k) + CONFLICT_SUFFIX
-        if not os.path.isfile(disable_name):
-            continue
-        enable_path = os.path.join(conf_dir, "".join(conf_name.split(CONFLICT_SUFFIX)[:-1]))
-        shutil.move(k, enable_path)
-        logging.info("deal with conflict UserParameter on outer config: {!s} -> {!s}".format(k, enable_path))
+    up_dir_set = get_include_up(conf_path)
+    for d in up_dir_set:
+        for f in glob.glob(d + CONFLICT_SUFFIX):
+            print(f)
+            if not os.path.isfile(f):
+                continue
+            conf_dir = os.path.dirname(f)
+            conf_name = os.path.basename(f)
+            enable_path = os.path.join(conf_dir, "".join(conf_name.split(CONFLICT_SUFFIX)[:-1]))
+            shutil.move(f, enable_path)
+            logging.info("deal with conflict UserParameter on outer config: {!s} -> {!s}".format(f, enable_path))
 
 def update_diff_conf(path, update_items, add_items, ignore_items):
     """将差异的 conf 文件内容补齐。
@@ -383,7 +392,7 @@ def upgrade_pre(is_force=False):
 def install_agent2_rpm(url, is_force=False):
     """安装 agnet2 的 rpm 包。
     """
-    if is_force and if os.path.isfile(AGENT2_PATH):
+    if is_force and os.path.isfile(AGENT2_PATH):
         command_lst = ["rpm", "-evh", "zabbix-agent2"]
         if lnx_command_execute(command_lst):
             logging.info("zabbix-agent2 is removed successfully")
@@ -470,6 +479,11 @@ def conv_agent2_enable():
     return True
 
 def execute(url, can_remove, deal_with_up, exec_rollback):
+    # Pre Checking
+    if not exec_rollback and not url:
+        raise Exception("please input the url param")
+    # EOF Pre Checking
+
     if exec_rollback:
         rollback_agentd()
         return
@@ -502,8 +516,10 @@ class MultiOrderedDict(OrderedDict):
 
 if __name__ == "__main__":
     # ########## Self Test
-    # INPUT_AGENT2_RPM_URL = "http://192.168.66.180:8080/zabbix-agent2-5.0.1-1.el7.x86_64.rpm"
+    # INPUT_AGENT2_RPM_URL = ""
     # INPUT_CAN_REMOVE = True
+    # INPUT_DEAL_CONFLICT_UP = True
+    # INPUT_ROLLBACK = False
     # ########## EOF Self Tes
 
     init_logger("debug")
