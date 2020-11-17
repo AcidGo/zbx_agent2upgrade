@@ -525,15 +525,15 @@ def execute(url, can_remove, ignore_not_support_params, deal_with_up, exec_rollb
 
     # 1. 抓取一次当前 agentd 的版本，备份 agentd 的文件。
     upgrade_pre(can_remove)
-    # 3. 检查 Zabbix-Agent2 不支持的配置项
+    # 2. 检查 Zabbix-Agent2 不支持的配置项
     if not ignore_not_support_params and has_not_support_params(AGENTD_CONF):
         raise Exception("found not support params, and choose not ignore them")
-    # 2. yum/rpm 安装对应的 agent2 rpm。
+    # 3. yum/rpm 安装对应的 agent2 rpm。
     install_agent2_rpm(url, can_remove)
-    # 3. 根据现有的 agentd 的配置填充到 agent2 中。
+    # 4. 根据现有的 agentd 的配置填充到 agent2 中。
     if os.path.isfile(AGENTD_CONF):
         conv_agent2_conf(AGENTD_CONF, AGENT2_CONF, deal_with_up, ignore_not_support_params)
-    # 4. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
+    # 5. systemctl stop zabbix-agent 或 service zabbix-agent stop。（这里最好 rhel7 的才升级）
     # systemctl disable zabbix-agent
     # systemctl start zabbix-agent2
     # systemctl enable zabbix-agent2
